@@ -57,6 +57,24 @@ if not GROQ_API_KEY:
     st.stop()
 
 # ---------------------------------------------------------------------------
+# Logging configuration
+# Writes to both logs/app.log (file) and the console.
+# ---------------------------------------------------------------------------
+os.makedirs("logs", exist_ok=True)   # create logs/ folder if it doesn't exist
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.FileHandler("logs/app.log", encoding="utf-8"),
+        logging.StreamHandler(),
+    ],
+)
+logger = logging.getLogger("AcademicAssistant")
+logger.info("Application started")
+
+# ---------------------------------------------------------------------------
 # Page configuration
 # ---------------------------------------------------------------------------
 st.set_page_config(
@@ -64,6 +82,31 @@ st.set_page_config(
     page_icon="📚",
     layout="wide",
 )
+
+# ---------------------------------------------------------------------------
+# Sidebar — Log Viewer (shows last 20 lines of logs/app.log)
+# ---------------------------------------------------------------------------
+with st.sidebar:
+    st.header("🛠️ Developer Tools")
+    st.markdown("---")
+    if st.button("📋 View Recent Logs", key="btn_view_logs"):
+        log_path = "logs/app.log"
+        if os.path.exists(log_path):
+            with open(log_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            last_lines = lines[-20:] if len(lines) > 20 else lines
+            st.text_area(
+                "Last 20 log entries",
+                value="".join(last_lines),
+                height=300,
+                key="log_viewer",
+            )
+        else:
+            st.info("No log file found yet. Upload a PDF to generate events.")
+    st.markdown("---")
+    st.caption("📁 Log file: `logs/app.log`")
+    st.caption("🔍 Level: INFO and above")
+
 
 # ---------------------------------------------------------------------------
 # SQLite helpers
@@ -142,6 +185,21 @@ def search_notes(query: str) -> pd.DataFrame:
     return df
 
 
+def delete_note(note_id: int) -> bool:
+    """Delete a note by its ID. Returns True if a row was deleted, False otherwise."""
+    conn = sqlite3.connect("academic_assistant.db")
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    if deleted:
+        logger.info("DB DELETE — note id=%d removed", note_id)
+    else:
+        logger.warning("DB DELETE — note id=%d not found", note_id)
+    return deleted
+
+
 # ---------------------------------------------------------------------------
 # Initialise database on startup
 # ---------------------------------------------------------------------------
@@ -193,6 +251,19 @@ if st.session_state.show_notes and not search_query:
     else:
         st.dataframe(df_notes, use_container_width=True)
         st.caption(f"Total records: {len(df_notes)}")
+
+        # ── Delete a note by ID (completes CRUD) ──────────────────────────
+        with st.expander("🗑️ Delete a Note"):
+            del_id = st.number_input(
+                "Enter Note ID to delete",
+                min_value=1, step=1, key="del_note_id"
+            )
+            if st.button("Delete Note", key="btn_delete_note"):
+                if delete_note(int(del_id)):
+                    st.success(f"✅ Note ID {int(del_id)} deleted successfully.")
+                    st.rerun()
+                else:
+                    st.error(f"❌ No note found with ID {int(del_id)}.")
 
 # ── Search results ────────────────────────────────────────────────────────
 if search_query:
