@@ -1,7 +1,1 @@
-# =============================================================================
-# packages.txt — System-level dependencies for Streamlit Community Cloud
-# These are apt packages installed before Python packages.
-# =============================================================================
-
-
 libgomp1
