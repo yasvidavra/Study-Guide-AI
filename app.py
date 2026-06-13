@@ -1,10 +1,11 @@
 # =============================================================================
 # AI Academic Assistant — app.py
-# Fixed: NameErrors, indentation/scope bugs, duplicate executions,
-#        View Saved Notes layout, SQLite duplicate inserts, pandas display.
+# Features: RAG pipeline, FAISS, Groq LLM, SQLite, Search Filter,
+#           Production-grade logging, Session-state guards.
 # Security: All API keys loaded from .env via python-dotenv (never hardcoded).
 # =============================================================================
 
+import logging
 import os
 import sqlite3
 from datetime import datetime
@@ -20,6 +21,24 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 
 # ---------------------------------------------------------------------------
+# Logging configuration
+# Writes to both logs/app.log (file) and the console.
+# ---------------------------------------------------------------------------
+os.makedirs("logs", exist_ok=True)   # create logs/ folder if it doesn't exist
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.FileHandler("logs/app.log", encoding="utf-8"),
+        logging.StreamHandler(),          # also print to terminal
+    ],
+)
+logger = logging.getLogger("AcademicAssistant")
+logger.info("Application started")
+
+# ---------------------------------------------------------------------------
 # Load environment variables from .env file (must be in project root)
 # ---------------------------------------------------------------------------
 load_dotenv()
@@ -29,6 +48,7 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")  # reserved for future use
 
 # Fail fast with a clear message if the required key is missing
 if not GROQ_API_KEY:
+    logger.critical("GROQ_API_KEY is not set. Application cannot start.")
     st.error(
         "⛔ GROQ_API_KEY is not set. "
         "Create a `.env` file in the project root and add:\n\n"
@@ -64,6 +84,7 @@ def create_database():
     """)
     conn.commit()
     conn.close()
+    logger.info("Database initialised — notes table ready")
 
 
 def save_note(filename: str, total_pages: int, upload_date: str, summary: str):
@@ -71,7 +92,6 @@ def save_note(filename: str, total_pages: int, upload_date: str, summary: str):
     (prevents duplicate inserts on every Streamlit rerun)."""
     conn = sqlite3.connect("academic_assistant.db")
     cursor = conn.cursor()
-    # Check for an existing record with this filename
     cursor.execute("SELECT id FROM notes WHERE filename = ?", (filename,))
     existing = cursor.fetchone()
     if existing is None:
@@ -83,6 +103,10 @@ def save_note(filename: str, total_pages: int, upload_date: str, summary: str):
             (filename, total_pages, upload_date, summary),
         )
         conn.commit()
+        logger.info("DB INSERT — filename='%s', pages=%d, date='%s'",
+                    filename, total_pages, upload_date)
+    else:
+        logger.debug("DB SKIP — '%s' already exists (id=%d)", filename, existing[0])
     conn.close()
 
 
@@ -93,6 +117,24 @@ def load_all_notes() -> pd.DataFrame:
     cursor.execute("SELECT * FROM notes")
     records = cursor.fetchall()
     conn.close()
+    df = pd.DataFrame(
+        records,
+        columns=["ID", "Filename", "Pages", "Upload Time", "Summary"],
+    )
+    return df
+
+
+def search_notes(query: str) -> pd.DataFrame:
+    """Return notes whose filename contains the search query (case-insensitive)."""
+    conn = sqlite3.connect("academic_assistant.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM notes WHERE LOWER(filename) LIKE LOWER(?)",
+        (f"%{query}%",),
+    )
+    records = cursor.fetchall()
+    conn.close()
+    logger.info("Search notes — query='%s', results=%d", query, len(records))
     df = pd.DataFrame(
         records,
         columns=["ID", "Filename", "Pages", "Upload Time", "Summary"],
@@ -126,19 +168,41 @@ st.markdown("""
 """)
 
 # ---------------------------------------------------------------------------
-# View Saved Notes (independent of PDF upload — always visible)
-# Uses session_state so clicking other buttons does not collapse the table.
+# View Saved Notes + Search Filter
+# Both panels are independent of PDF upload — always visible.
 # ---------------------------------------------------------------------------
-if st.button("📚 View Saved Notes"):
-    st.session_state.show_notes = True
+col_view, col_search = st.columns([1, 2])
 
-if st.session_state.show_notes:
-    st.subheader("📚 Stored Notes")
+with col_view:
+    if st.button("📚 View Saved Notes", key="btn_view_notes"):
+        st.session_state.show_notes = True
+
+with col_search:
+    search_query = st.text_input(
+        "🔍 Search saved notes by filename",
+        placeholder="e.g. COA, OOP, maths...",
+        key="search_input",
+    )
+
+# ── View all notes ────────────────────────────────────────────────────────
+if st.session_state.show_notes and not search_query:
+    st.subheader("📚 All Saved Notes")
     df_notes = load_all_notes()
     if df_notes.empty:
         st.info("No notes saved yet. Upload a PDF to get started.")
     else:
         st.dataframe(df_notes, use_container_width=True)
+        st.caption(f"Total records: {len(df_notes)}")
+
+# ── Search results ────────────────────────────────────────────────────────
+if search_query:
+    st.subheader(f"🔍 Search Results for: *{search_query}*")
+    df_search = search_notes(search_query)
+    if df_search.empty:
+        st.warning(f"No notes found matching **'{search_query}'**.")
+    else:
+        st.success(f"Found **{len(df_search)}** matching record(s).")
+        st.dataframe(df_search, use_container_width=True)
 
 st.divider()
 
@@ -156,6 +220,8 @@ uploaded_files = st.file_uploader(
 # All PDF-dependent logic lives inside this block
 # ---------------------------------------------------------------------------
 if uploaded_files:
+    logger.info("PDF upload event — %d file(s): %s",
+                len(uploaded_files), [f.name for f in uploaded_files])
     st.success(f"✅ {len(uploaded_files)} PDF(s) uploaded successfully!")
 
     # ------------------------------------------------------------------
@@ -166,13 +232,17 @@ if uploaded_files:
     upload_date = datetime.now().strftime("%d-%m-%Y %H:%M")
 
     for pdf in uploaded_files:
-        reader = PdfReader(pdf)
-        total_pages += len(reader.pages)
-
-        for page in reader.pages:
-            text = page.extract_text()
-            if text:
-                full_text += text
+        try:
+            reader = PdfReader(pdf)
+            total_pages += len(reader.pages)
+            for page in reader.pages:
+                text = page.extract_text()
+                if text:
+                    full_text += text
+            logger.info("Extracted text from '%s' (%d pages)", pdf.name, len(reader.pages))
+        except Exception as exc:
+            logger.error("Failed to read PDF '%s': %s", pdf.name, exc, exc_info=True)
+            st.error(f"Could not read {pdf.name}: {exc}")
 
     st.write(f"📄 Total Pages Loaded: **{total_pages}**")
     st.write(f"🔤 Total Characters Extracted: **{len(full_text)}**")
@@ -197,6 +267,7 @@ if uploaded_files:
     )
     chunks = text_splitter.split_text(full_text)
     st.write(f"🧩 Total Chunks Created: **{len(chunks)}**")
+    logger.info("Text split into %d chunks", len(chunks))
 
     # ------------------------------------------------------------------
     # Step 4 — Build FAISS vector store (limit to 15 chunks to avoid quota)
@@ -210,6 +281,7 @@ if uploaded_files:
 
     vectorstore = FAISS.from_documents(documents, embeddings)
     st.write("✅ FAISS Vector Database Created Successfully")
+    logger.info("FAISS vector store built — %d documents indexed", len(documents))
 
     retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
     st.write("✅ Retriever Created Successfully")
@@ -255,26 +327,42 @@ if uploaded_files:
     # Result stored in session_state to survive reruns.
     # ------------------------------------------------------------------
     if summary_button:
+        logger.info("Summary generation requested")
         with st.spinner("Generating Summary..."):
-            summary_prompt = f"""
+            try:
+                summary_prompt = f"""
 Summarize these notes in simple bullet points.
 
 Notes:
 {summary_context}
 """
-            summary_response = llm.invoke(summary_prompt)
-            st.session_state.summary_result = summary_response.content
+                summary_response = llm.invoke(summary_prompt)
+                st.session_state.summary_result = summary_response.content
+                logger.info("Summary generated successfully (%d chars)",
+                            len(summary_response.content))
+            except Exception as exc:
+                logger.error("Summary generation failed: %s", exc, exc_info=True)
+                st.error(f"Summary failed: {exc}")
 
     if st.session_state.summary_result:
         st.subheader("📝 Notes Summary")
         st.write(st.session_state.summary_result)
+        st.download_button(
+            label="⬇️ Download Summary",
+            data=st.session_state.summary_result,
+            file_name="study_summary.txt",
+            mime="text/plain",
+            key="dl_summary",
+        )
 
     # ------------------------------------------------------------------
     # Quiz Feature — executes exactly once per button click
     # ------------------------------------------------------------------
     if quiz_button:
+        logger.info("Quiz generation requested")
         with st.spinner("Generating Quiz..."):
-            quiz_prompt = f"""
+            try:
+                quiz_prompt = f"""
 Create 5 MCQ questions from these notes.
 
 For each question provide:
@@ -289,8 +377,13 @@ Correct Answer:
 Notes:
 {summary_context}
 """
-            quiz_response = llm.invoke(quiz_prompt)
-            st.session_state.quiz_result = quiz_response.content
+                quiz_response = llm.invoke(quiz_prompt)
+                st.session_state.quiz_result = quiz_response.content
+                logger.info("Quiz generated successfully (%d chars)",
+                            len(quiz_response.content))
+            except Exception as exc:
+                logger.error("Quiz generation failed: %s", exc, exc_info=True)
+                st.error(f"Quiz failed: {exc}")
 
     if st.session_state.quiz_result:
         st.subheader("🎯 AI Quiz")
@@ -302,6 +395,7 @@ Notes:
     # ------------------------------------------------------------------
     if question and question != st.session_state.qa_question:
         st.session_state.qa_question = question
+        logger.info("User question: '%s'", question)
         try:
             with st.spinner("Thinking..."):
                 qa_prompt = f"""
@@ -326,8 +420,11 @@ QUESTION:
 """
                 response = llm.invoke(qa_prompt)
                 st.session_state.qa_result = response.content
-        except Exception as e:
-            st.error(f"Error: {e}")
+                logger.info("Answer generated for question: '%s' (%d chars)",
+                            question, len(response.content))
+        except Exception as exc:
+            logger.error("Q&A failed for question '%s': %s", question, exc, exc_info=True)
+            st.error(f"Error: {exc}")
             st.session_state.qa_result = None
 
     if st.session_state.qa_result and st.session_state.qa_question:
