@@ -1,0 +1,7 @@
+# =============================================================================
+# packages.txt — System-level dependencies for Streamlit Community Cloud
+# These are apt packages installed before Python packages.
+# =============================================================================
+
+# Required by FAISS and numpy native extensions
+libgomp1
