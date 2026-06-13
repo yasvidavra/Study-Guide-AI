@@ -142,6 +142,21 @@ def search_notes(query: str) -> pd.DataFrame:
     return df
 
 
+def delete_note(note_id: int) -> bool:
+    """Delete a note by its ID. Returns True if a row was deleted, False otherwise."""
+    conn = sqlite3.connect("academic_assistant.db")
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    if deleted:
+        logger.info("DB DELETE — note id=%d removed", note_id)
+    else:
+        logger.warning("DB DELETE — note id=%d not found", note_id)
+    return deleted
+
+
 # ---------------------------------------------------------------------------
 # Initialise database on startup
 # ---------------------------------------------------------------------------
@@ -193,6 +208,19 @@ if st.session_state.show_notes and not search_query:
     else:
         st.dataframe(df_notes, use_container_width=True)
         st.caption(f"Total records: {len(df_notes)}")
+
+        # ── Delete a note by ID (completes CRUD) ──────────────────────────
+        with st.expander("🗑️ Delete a Note"):
+            del_id = st.number_input(
+                "Enter Note ID to delete",
+                min_value=1, step=1, key="del_note_id"
+            )
+            if st.button("Delete Note", key="btn_delete_note"):
+                if delete_note(int(del_id)):
+                    st.success(f"✅ Note ID {int(del_id)} deleted successfully.")
+                    st.rerun()
+                else:
+                    st.error(f"❌ No note found with ID {int(del_id)}.")
 
 # ── Search results ────────────────────────────────────────────────────────
 if search_query:
