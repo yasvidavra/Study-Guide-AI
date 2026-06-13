@@ -7,6 +7,7 @@
 [![LangChain](https://img.shields.io/badge/LangChain-0.3-green)](https://www.langchain.com/)
 [![Groq](https://img.shields.io/badge/Groq-LLaMA%203.1-orange)](https://groq.com/)
 [![FAISS](https://img.shields.io/badge/FAISS-VectorDB-purple)](https://faiss.ai/)
+[![SQLite](https://img.shields.io/badge/SQLite-Database-lightblue)](https://www.sqlite.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 ---
@@ -19,6 +20,8 @@ The **AI Academic Assistant** is a Streamlit-based web application that allows s
 - Automatic **summary generation** in bullet-point format
 - AI-generated **multiple-choice quiz** questions for self-testing
 - Persistent **SQLite storage** of all uploaded PDF metadata
+- **Search and filter** saved notes by filename
+- **Production-grade logging** of all events to `logs/app.log`
 
 This project demonstrates end-to-end integration of modern AI tools including **HuggingFace embeddings**, **FAISS vector search**, and **Groq's LLaMA 3.1** large language model.
 
@@ -38,6 +41,34 @@ This project demonstrates end-to-end integration of modern AI tools including **
 | 💬 **Question Answering** | Ask any question — the AI answers strictly from your notes |
 | 🗄️ **SQLite Database** | Saves PDF metadata (filename, pages, upload date, summary) persistently |
 | 📊 **View Saved Notes** | Browse all previously uploaded PDFs in a formatted DataFrame table |
+| 🔍 **Search & Filter** | Search saved notes by filename using a real-time SQLite LIKE query |
+| 📋 **Error Logging** | All events logged to `logs/app.log` with timestamps and severity levels |
+| ⬇️ **Download Summary** | Export generated summaries as `.txt` files |
+
+---
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│                  Streamlit UI Layer                 │
+│  Upload │ Search │ Summary │ Quiz │ Q&A │ Notes     │
+└──────────────┬──────────────────────────────────────┘
+               │
+    ┌──────────▼──────────┐     ┌──────────────────┐
+    │   RAG Pipeline      │     │  SQLite Database  │
+    │  PyPDF → Chunker    │     │  notes table      │
+    │  → HuggingFace Emb  │     │  (filename, pages,│
+    │  → FAISS VectorDB   │     │   upload_date,    │
+    │  → Retriever        │     │   summary)        │
+    └──────────┬──────────┘     └──────────────────┘
+               │
+    ┌──────────▼──────────┐     ┌──────────────────┐
+    │   Groq LLM          │     │  Logging Module   │
+    │   LLaMA 3.1 8B      │     │  logs/app.log     │
+    │   (Summary/Quiz/QA) │     │  (all events)     │
+    └─────────────────────┘     └──────────────────┘
+```
 
 ---
 
@@ -52,6 +83,7 @@ This project demonstrates end-to-end integration of modern AI tools including **
 | [FAISS](https://faiss.ai/) | High-performance vector similarity search |
 | [PyPDF](https://pypdf.readthedocs.io/) | PDF text extraction |
 | [SQLite3](https://www.sqlite.org/) | Lightweight embedded relational database |
+| [Python `logging`](https://docs.python.org/3/library/logging.html) | Production-grade event logging |
 
 ### Frontend & UI
 | Technology | Purpose |
@@ -70,7 +102,12 @@ Agentic_AI_Project/
 ├── requirements.txt          # Python dependencies
 ├── .gitignore                # Files excluded from version control
 ├── .env                      # API keys (NOT committed to Git)
+├── .env.example              # API key template (safe to commit)
 ├── README.md                 # Project documentation
+│
+├── logs/                     # Application log files
+│   ├── .gitkeep              # Keeps folder tracked by Git
+│   └── app.log               # Runtime log (auto-generated, NOT committed)
 │
 ├── academic_assistant.db     # SQLite database (auto-created, NOT committed)
 │
@@ -91,8 +128,8 @@ Agentic_AI_Project/
 
 ### Step 1 — Clone the Repository
 ```bash
-git clone https://github.com/YOUR_USERNAME/ai-academic-assistant.git
-cd ai-academic-assistant
+git clone https://github.com/yasvidavra/Study-Guide-AI.git
+cd Study-Guide-AI
 ```
 
 ### Step 2 — Create a Virtual Environment
@@ -112,7 +149,10 @@ pip install -r requirements.txt
 ```
 
 ### Step 4 — Configure API Keys
-Create a `.env` file in the root directory:
+Copy the example file and fill in your real key:
+```bash
+cp .env.example .env
+```
 ```env
 GROQ_API_KEY=your_groq_api_key_here
 ```
@@ -128,13 +168,82 @@ The app will open automatically at **http://localhost:8501**
 
 ---
 
+## 📋 Database Module
+
+The application uses **SQLite** via Python's built-in `sqlite3` module.
+
+### Schema — `notes` table
+| Column | Type | Description |
+|---|---|---|
+| `id` | INTEGER PK | Auto-incremented unique identifier |
+| `filename` | TEXT | Name of the uploaded PDF file |
+| `total_pages` | INTEGER | Number of pages in the PDF |
+| `upload_date` | TEXT | Timestamp of upload (`DD-MM-YYYY HH:MM`) |
+| `summary` | TEXT | AI-generated summary (or placeholder) |
+
+### Key Functions
+| Function | Description |
+|---|---|
+| `create_database()` | Creates the table if it does not exist |
+| `save_note()` | Inserts a record — skips if filename already exists |
+| `load_all_notes()` | Returns all records as a pandas DataFrame |
+| `search_notes(query)` | Returns filtered records using SQLite `LIKE` |
+
+---
+
+## 🔍 Search & Filter Feature
+
+The search bar filters saved notes in real-time using a **case-insensitive SQLite LIKE query**:
+
+```sql
+SELECT * FROM notes WHERE LOWER(filename) LIKE LOWER('%query%')
+```
+
+- Type any part of a filename (e.g. `COA`, `oop`, `maths`)
+- Results update immediately without a page reload
+- Shows a count of matching records
+- Displays "No results found" if nothing matches
+
+---
+
+## 📋 Error Logging
+
+All application events are logged to `logs/app.log` using Python's built-in `logging` module.
+
+### Log Format
+```
+2026-06-13 16:30:00 | INFO     | AcademicAssistant | Application started
+2026-06-13 16:30:15 | INFO     | AcademicAssistant | PDF upload event — 2 file(s): ['COA.pdf', 'OOP.pdf']
+2026-06-13 16:30:16 | INFO     | AcademicAssistant | DB INSERT — filename='COA.pdf', pages=45, date='13-06-2026 16:30'
+2026-06-13 16:30:45 | INFO     | AcademicAssistant | Summary generated successfully (1284 chars)
+2026-06-13 16:31:02 | ERROR    | AcademicAssistant | Q&A failed for question 'what is cache?': Connection timeout
+```
+
+### Events Logged
+| Event | Level |
+|---|---|
+| Application startup | INFO |
+| PDF upload (filenames, count) | INFO |
+| Text extraction per file | INFO |
+| Database INSERT | INFO |
+| Database SKIP (duplicate) | DEBUG |
+| FAISS vector store created | INFO |
+| Summary generation | INFO |
+| Quiz generation | INFO |
+| User question submitted | INFO |
+| Answer generated | INFO |
+| Any exception | ERROR |
+| Missing API key | CRITICAL |
+
+---
+
 ## 🖼️ Screenshots
 
 > *Add screenshots to the `screenshots/` folder and update the paths below.*
 
-| Upload & Process | Summary | Quiz | Q&A |
-|---|---|---|---|
-| ![Upload](screenshots/upload.png) | ![Summary](screenshots/summary.png) | ![Quiz](screenshots/quiz.png) | ![QA](screenshots/qa.png) |
+| Upload & Process | Search Notes | Summary | Quiz | Q&A |
+|---|---|---|---|---|
+| ![Upload](screenshots/upload.png) | ![Search](screenshots/search.png) | ![Summary](screenshots/summary.png) | ![Quiz](screenshots/quiz.png) | ![QA](screenshots/qa.png) |
 
 ---
 
@@ -148,11 +257,37 @@ The app will open automatically at **http://localhost:8501**
    - Click **🎯 Generate Quiz** for 5 MCQ practice questions
    - Type a question in the **💬 Ask a Question** box for instant answers
 5. Click **📚 View Saved Notes** to browse your upload history
+6. Use the **🔍 Search bar** to filter saved notes by filename
+
+---
+
+## 🌿 Git Workflow
+
+This project follows a feature-branch Git workflow:
+
+```
+main
+ └── development
+      ├── feature/database     # SQLite CRUD operations
+      ├── feature/ui           # Streamlit layout & session state
+      ├── feature/search-filter # Search bar & SQLite LIKE query
+      └── feature/error-logging # Python logging module integration
+```
+
+### Branch Strategy
+| Branch | Purpose |
+|---|---|
+| `main` | Stable, production-ready code only |
+| `development` | Integration branch — all features merge here first |
+| `feature/*` | Individual feature branches created from `main` |
 
 ---
 
 ## 🔮 Future Enhancements
 
+- [x] Search & filter saved notes by filename
+- [x] Production-grade error logging
+- [x] Download summary as `.txt` file
 - [ ] **Multi-language Support** — Answer questions in different languages
 - [ ] **Flashcard Generator** — Auto-create study flashcards from notes
 - [ ] **Progress Tracker** — Track quiz scores and study sessions over time
@@ -173,7 +308,7 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 
 **Kavya Vaghela**
 - 📧 Academic Assessment Project — AI/ML Module
-- 🔗 [GitHub](https://github.com/KavyaVaghela)
+- 🔗 [GitHub](https://github.com/yasvidavra)
 
 ---
 
