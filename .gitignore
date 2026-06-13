@@ -1,0 +1,73 @@
+# =============================================================================
+# .gitignore — AI Academic Assistant
+# =============================================================================
+
+# ── Secrets & API Keys (CRITICAL — never commit these) ───────────────────────
+.env
+*.env
+!.env.example
+
+# ── Uploaded PDFs (user data — not committed) ────────────────────────────────
+data/uploads/
+data/*.pdf
+*.pdf
+
+# ── Streamlit config (may contain secrets.toml) ──────────────────────────────
+.streamlit/
+
+# ── SQLite Database (user data — regenerated at runtime) ─────────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Python cache & bytecode ──────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyo
+*.pyd
+
+# ── Virtual Environments ─────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+ENV/
+
+# ── Python packaging ─────────────────────────────────────────────────────────
+*.egg
+*.egg-info/
+dist/
+build/
+
+# ── Jupyter Notebooks checkpoints ───────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ── Testing ──────────────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── IDEs ─────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── OS generated files ───────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Logs & Temp ──────────────────────────────────────────────────────────────
+*.log
+*.tmp
+*.bak
+app_backup.py
+
+# ── FAISS / Model cache ──────────────────────────────────────────────────────
+faiss_index/
+*.faiss
+*.pkl
+*.bin
+sentence_transformers_cache/
