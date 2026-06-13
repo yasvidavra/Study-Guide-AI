@@ -1,10 +1,31 @@
-streamlit
-langchain
-langchain-community
-langchain-groq
-langchain-text-splitters
-faiss-cpu
-pypdf
-sentence-transformers
-python-dotenv
-pandas
+# =============================================================================
+# requirements.txt — AI Academic Assistant
+# Pinned for Streamlit Community Cloud deployment stability.
+# Last verified: June 2026
+# =============================================================================
+
+# ── Streamlit ─────────────────────────────────────────────────────────────────
+streamlit>=1.35.0
+
+# ── LangChain ecosystem ───────────────────────────────────────────────────────
+langchain>=0.2.0
+langchain-community>=0.2.0
+langchain-groq>=0.1.6
+langchain-text-splitters>=0.2.0
+langchain-core>=0.2.0
+
+# ── Vector database ───────────────────────────────────────────────────────────
+faiss-cpu>=1.8.0
+
+# ── Embeddings ────────────────────────────────────────────────────────────────
+sentence-transformers>=2.7.0
+
+# ── PDF parsing ───────────────────────────────────────────────────────────────
+pypdf>=4.2.0
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+pandas>=2.2.0
+numpy>=1.26.0
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+python-dotenv>=1.0.0
