@@ -61,6 +61,7 @@ desktop.ini
 
 # ── Logs & Temp ──────────────────────────────────────────────────────────────
 *.log
+logs/*.log
 *.tmp
 *.bak
 app_backup.py
